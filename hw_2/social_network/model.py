@@ -21,24 +21,24 @@ class UserStorage:
 
 
     @classmethod
-    def add_user(cls, user: User) -> None:
-        """
-        Добавляет в хранилище новую сущность
-        :return: str
-        """
-        if not isinstance(user, User):
-            raise ValueError('Получен не верный тип данных')
-
-        cls.__user_storage.append(user)
-
-
-    @classmethod
     def get_all_users(cls) -> list:
         """
         Возвращает всех пользователей, хранящихся в базе данных
         :return: list
         """
         return cls.__user_storage
+
+
+    @classmethod
+    def add_user(cls, user: User) -> None:
+        """
+        Добавляет в хранилище новую сущность
+        :return: None
+        """
+        if not isinstance(user, User):
+            raise ValueError('Получен не верный тип данных')
+
+        cls.__user_storage.append(user)
 
 
     @classmethod

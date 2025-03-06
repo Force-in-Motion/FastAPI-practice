@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from social_network.service.model import *
+from model import *
 
 app = FastAPI()
 
@@ -17,7 +17,6 @@ def add_data(user: User):
     Обрабатывает запрос post, отправляет данные на сервер
     """
     UserStorage.add_user(user)
-
     return {'status': 'ok'}
 
 
@@ -27,11 +26,11 @@ def changes_like(name):
     Обрабатывает запрос patch, изменяет данные на сервере
     """
     result = UserStorage.add_user_like(name)
-    if result:
-        return {'status': 'ok'}
-
-    else:
+    if  not result:
         raise HTTPException(status_code=404, detail='Пользователь с таким именем не найден')
+
+    return {'status': 'ok'}
+
 
 
 @app.patch('/cats/{name}/dislike')
@@ -40,11 +39,10 @@ def changes_dislike(name):
     Обрабатывает запрос patch, изменяет данные на сервере
     """
     result = UserStorage.add_user_dislike(name)
-    if result:
-        return {'status': 'ok'}
+    if  not result:
+        raise HTTPException(status_code=404, detail='Пользователь с таким именем не найден')
 
-    else:
-        HTTPException(status_code=404, detail='Пользователь с таким именем не найден')
+    return {'status': 'ok'}
 
 
 @app.delete('/cats/{name}')
@@ -53,10 +51,10 @@ def del_data(name):
     Обрабатывает запрос delete, удаляет данные с сервера
     """
     result = UserStorage.del_user(name)
-    if result:
-        return {'status': 'ok'}
+    if  not result:
+        raise HTTPException(status_code=404, detail='Пользователь с таким именем не найден')
 
-    else: HTTPException(status_code=404, detail='Пользователь с таким именем не найден')
+    return {'status': 'ok'}
 
 
 
