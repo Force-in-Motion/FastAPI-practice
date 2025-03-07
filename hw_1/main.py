@@ -5,9 +5,11 @@ from service import Service as sv
 app = FastAPI()
 
 @app.get('/password')
-def return_password(length: str):
+def return_password(length: str) -> str:
     """
     Возвращает случайный пароль заданной длины
+    :return:
+    :rtype:
     :param length: длинна пароля
     :return: int
     """
@@ -17,7 +19,7 @@ def return_password(length: str):
 
 
 @app.get('/gravity')
-def return_force_of_attraction(name_planet: str, height: str):
+def return_force_of_attraction(name_planet: str, height: str) -> bool | dict[str, float]:
     """
     Возвращает силу притяжения там согласно закону всемирного тяготения
     :param name_planet: название планеты
@@ -33,7 +35,7 @@ def return_force_of_attraction(name_planet: str, height: str):
 
 
 @app.get('/speeding-fine')
-def return_speeding_fine(speed, limit):
+def return_speeding_fine(speed, limit) -> str | None:
     """
     Возвращает размер штрафа исходя из принятых параметров
     :param speed: текущая скорость
