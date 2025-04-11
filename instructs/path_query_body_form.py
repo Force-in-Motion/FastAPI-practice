@@ -222,7 +222,7 @@ async def create_message(message: str = Body()) -> str:
     return "Message created!"
 
 
-# TODO Теперь после выполнения пост запроса в документации http://127.0.0.1:8000/docs мы увидим следующее:
+# TODO  Теперь после выполнения пост запроса в документации http://127.0.0.1:8000/docs мы увидим следующее:
 
 # curl -X 'POST' \
 #   'http://127.0.0.1:8000/message' \
@@ -231,6 +231,48 @@ async def create_message(message: str = Body()) -> str:
 #   -d '"Second post in FastAPI"'
 
 # ========================================================================================================================
+
+# TODO  Когда методы API предназначены для обработки веб форм,
+#       функции должны получать параметры формы вместо тела запроса,
+#       поскольку эти данные формы обычно кодируются как application/x-www-form-urlencoded
+
+# TODO  Чтобы использовать формы, сначала установите python-multipart.
+
+# TODO  Чтобы принять текст записи из формы, мы должны установить Form() к параметру, который мы будем принимать из формы.
+#       В нашем случае это сам текст записи. Мы можем настроить Form точно так же, как и  Body, Query, Path, включая параметры валидации, описания и тд.
+
+# TODO  Например, если мы возьмем следующую форму:
+
+<form method="post" action="/">
+  <input type="text" name="message">
+  <button type="submit">Add</button>
+</form>
+
+
+# TODO  Используя name="message", мы передаем в POST запросе в качестве параметра запроса message.
+
+async def create_message(request: Request, message: str = Form())
+
+
+# TODO   А в случае если у нас будет 4 поля то и форма будет выглядеть следующим образом:
+
+< form method = "post" action = "/" >
+  < input type = "text" name = "message1" >
+  < input type = "text" name = "message2" >
+  < input type = "text" name = "message3" >
+  < input type = "text" name = "message4" >
+
+  < button type = "submit" > Add < / button >
+< / form >
+
+
+# TODO  И принимать мы будем как:
+
+async def create_message(request: Request, message1: str = Form(), message2: str = Form(), message3: str = Form(), message4: str = Form()) -> HTMLResponse:
+
+
+
+
 
 
 if __name__ == "__main__":
