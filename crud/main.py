@@ -8,7 +8,9 @@ from fastapi.responses import (
 from typing import Annotated
 from model import Message
 
-app = FastAPI()
+app = FastAPI(title="Crud", redirect_slashes=True)
+
+
 templates = Jinja2Templates(
     directory="crud/templates"
 )  # Определяет путь к папке, в которой хранятся шаблоны html. Теперь Jinja понимает, что нужно искать HTML-файлы внутри этой папки шаблонов.
@@ -100,4 +102,4 @@ async def kill_message_all() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("test:app", reload=True)
+    uvicorn.run("main:app", reload=True)
