@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, Response
 from fastapi.security import HTTPBasicCredentials, HTTPBasic
 
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(tags=["Base"])
 
 security = HTTPBasic()
 
 
 # Аутентификация по HTTPBasic
-@router.get("/base")
+@router.get("/base", response_model=dict)
 async def base_auth_credentials(
     credentials: Annotated[HTTPBasicCredentials, Depends(security)],
 ):
@@ -64,7 +64,7 @@ async def verify_credentials(
     return credentials.username
 
 
-@router.get("/user")
+@router.get("/user", response_model=dict)
 async def user_auth_credentials(
     user_name: str = Depends(
         verify_credentials
@@ -103,7 +103,7 @@ async def verify_by_static_token(
     return auth_by_static_token.get(static_token)
 
 
-@router.get("/static-token")
+@router.get("/static-token", response_model=dict)
 async def http_header_auth(
     user_name: str = Depends(
         verify_by_static_token
