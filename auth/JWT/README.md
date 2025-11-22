@@ -58,6 +58,7 @@ class JWTSettings(BaseModel):
     
     refresh_token: int = 60 # Определяем время действия refresh токена в минутах
 
+jwt_settings = JWTSettings()
 # =====================================================================================================
 
 # Далее нам нужно создать утилиты для сборки и кодирования готового JWT из его компонентов,
@@ -67,19 +68,26 @@ class JWTSettings(BaseModel):
 import bcrypt
 from fastapi.background import P
 import jwt
-from auth.JWT.settings import JWTSettings
+from auth.JWT.settings import jwt_settings
 
 
 class JWTUtils:
     """Содержит служебные утилиты для работы с jwt токеном"""
-    def expire_jwt(payload: dict) -> dict:
+    def expire_jwt() -> dict:
         """
-        Определяет время действия токена
-        :param payload: Полезная нагрузка, данные, которые должны быть 
-        :return: Обновленный payload, с добавленным временем действия токена
+        Определяет время действия токена в минутах
+        :return: время действия токена в минутах и текущее время
         """
-        payload = payload.copy()
+        # Для того чтобы выдать токен, который будет иметь срок действия в минутах,
+        # начиная с времени выдачинам нужно получить текущее время и прибавить к нему время действия токена, указанное в настройках
 
+        now = datetime.now(timezone.utc) # Получвем текущее время
+
+        expire_minutes: int = jwt_settings.access_token_expire # Получаем Срок действия access токена в минутах из настроек
+
+        expire = now + timedelta(minutes=expire_minutes) # Прибавляем к текущему времени now время действия токена, указанное в настройках
+
+        return expire, now
 
 
     def encode_jwt(payload: dict) -> str:
@@ -88,20 +96,11 @@ class JWTUtils:
         :param payload: Полезная нагрузка, данные, которые должны быть переданы в токене
         :return: Готовый закодированный токен
         """
-        private_key: str = JWTSettings.private_key.read_text() # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла private.pem
+        private_key: str = jwt_settings.private_key.read_text() # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла private.pem
 
-        algorithm: str = JWTSettings.algorithm # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
+        algorithm: str = jwt_settings.algorithm # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
 
-
-        # Для того чтобы выдать токен, который будет иметь срок действия в минутах,
-        # начиная с времени выдачинам нужно получить текущее время и прибавить к нему время действия токена, указанное в настройках
-
-        now = datetime.now(timezone.utc) # Получвем текущее время
-
-        expire_minutes: int = JWTSettings.access_token_expire # Получаем Срок действия access токена в минутах из настроек
-
-        expire = now + timedelta(minutes=expire_minutes) # Прибавляем к текущему времени now время действия токена, указанное в настройках
-
+        expire, now = JWTUtils.expire_jwt() # Получаем срок действия токена в минутах, остчет расчитан от времени его выдачи
 
         # Формируем измененный payload с добавленным сроком действия access токена
         payload_copy = payload.copy() # Копируем, полукченный от клиента, payload чтобы не изменять оригинальный
@@ -125,9 +124,9 @@ class JWTUtils:
         :param token: Закодированный в base64 токен
         :return: Раскодированные данные, переданные в токене ( Head.Payload.Signature)
         """
-        public_key: str = JWTSettings.public_key.read_text(), # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла jwt-public.pem
+        public_key: str = jwt_settings.public_key.read_text(), # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла jwt-public.pem
 
-        algoritm: str = JWTSettings.algoritm, # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
+        algoritm: str = jwt_settings.algoritm, # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
 
         decode = jwt.decode(
             jwt=token,
@@ -137,6 +136,9 @@ class JWTUtils:
 
         return decode
     
+
+class AuthUtils:
+
     def hash_password(password: str) -> bytes:
         """
         Хэширует полученный, в формате строки, пароль в байты
@@ -151,9 +153,9 @@ class JWTUtils:
     
 
     def validate_password(
-            password: str,
-            hashed_password: bytes,
-        ) -> bool:
+        password: str,
+        hashed_password: bytes,
+    ) -> bool:
         """
         Проверяет соответствие, введенного пользователем, пароля в виде строки сохраненному паролю в байтах
         :param password: Полученный от пользователя пароль
@@ -226,3 +228,25 @@ class UserSchema(BaseModel):
 class TokenSchema(BaseModel):
     access_token: str
     type_token: str # Тип токена ( обычно Bearer )
+
+
+
+# =========================================================================================================================
+
+# Вью, выдающее access токен пользователю в случае успешной авторизации по логину и паролю
+
+@router.post("/login", response_model=TokenSchema)
+def issues_jwt_to_user(user: UserSchema = Depends(validate_user_auth)):
+    """
+    Возвращает JWT в заголовке, в случае успешной аутентификации через зависимость ( Выдает токен пользователю )
+    В тело функции мы попадем только в случае успешной палидации логина и пароля
+    :param param:
+    :param param:
+    :return:
+    """
+    payload = {"sub": user.id, "name": user.name, "emmail": user.email}
+
+    # Генерирует access_token (токен короткого срока действия), для создания токена необходимо передать payload ( полезную нагрузку )
+    access_token = JWTUtils.encode_jwt(payload)
+
+    return TokenSchema(access_token=access_token, type_token="Bearer")

@@ -3,7 +3,7 @@
 
 from auth.JWT.schemas.token import TokenSchema
 from auth.JWT.schemas.user import UserSchema
-from auth.JWT.utils import JWTUtils
+from auth.JWT.utils import JWTUtils, AuthUtils
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 
 router = APIRouter(tags=["JWT"])
@@ -15,14 +15,14 @@ router = APIRouter(tags=["JWT"])
 bob = UserSchema(
     id=1,
     name='Bob',
-    password=JWTUtils.hash_password('qwerty'),
+    password=AuthUtils.hash_password('qwerty'),
     email='asd@gmail.com'
 )
 
 sam = UserSchema(
     id=2,
     name='Sam',
-    password=JWTUtils.hash_password('asdfg')
+    password=AuthUtils.hash_password('asdfg')
 )
 
 # Создаем базу данных, с диначиским ключем, равным именю пользователя из схемы и схемой в качестве значения
@@ -58,7 +58,7 @@ def validate_user_auth(
         if not user: # Если пользователя нет - выбрасывает исключение
             raise unauthorized
 
-        if not JWTUtils.validate_password( # Если пользователь найден, то сравнивает пароли: через метод validate_password хэширует полученный пароль и сравнивает с захэшированным паролем в базе
+        if not AuthUtils.validate_password( # Если пользователь найден, то сравнивает пароли: через метод validate_password хэширует полученный пароль и сравнивает с захэшированным паролем в базе
             password=password,
             hashed_password=user.password,
         ):
@@ -70,10 +70,12 @@ def validate_user_auth(
 
         return user
 
+
+
 @router.post("/login", response_model=TokenSchema)
-def auth_user_issue_jwt(user: UserSchema = Depends(validate_user_auth)):
+def issues_jwt_to_user(user: UserSchema = Depends(validate_user_auth)):
     """
-    Возвращает JWT в заголовке, в случае успешной аутентификации через зависимость
+    Возвращает JWT в заголовке, в случае успешной аутентификации через зависимость ( Выдает токен пользователю )
     В тело функции мы попадем только в случае успешной палидации логина и пароля
     :param param:
     :param param:
@@ -85,3 +87,5 @@ def auth_user_issue_jwt(user: UserSchema = Depends(validate_user_auth)):
     access_token = JWTUtils.encode_jwt(payload)
 
     return TokenSchema(access_token=access_token, type_token="Bearer")
+
+

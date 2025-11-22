@@ -2,60 +2,49 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from auth.JWT.schemas.user import UserSchema
 import jwt
-from auth.JWT.settings import JWTSettings
+from auth.JWT.settings import jwt_settings
 
 
 
 class JWTUtils:
     """Содержит служебные утилиты для работы с jwt токеном"""
-
-    @staticmethod
-    def expire_jwt(payload: dict) -> dict:
+    def expire_jwt() -> dict:
         """
-        Определяет время действия токена
-        :param payload: Полезная нагрузка, данные, которые должны быть
-        :return: Обновленный payload, с добавленным временем действия токена
+        Определяет время действия токена в минутах
+        :return: время действия токена в минутах и текущее время
         """
-        payload = payload.copy()
+        # Для того чтобы выдать токен, который будет иметь срок действия в минутах,
+        # начиная с времени выдачинам нужно получить текущее время и прибавить к нему время действия токена, указанное в настройках
 
-    @staticmethod
+        now = datetime.now(timezone.utc) # Получвем текущее время
+
+        expire_minutes: int = jwt_settings.access_token_expire # Получаем Срок действия access токена в минутах из настроек
+
+        expire = now + timedelta(minutes=expire_minutes) # Прибавляем к текущему времени now время действия токена, указанное в настройках
+
+        return expire, now
+
+
     def encode_jwt(payload: dict) -> str:
         """
         Собирает токен из полученных данных и кодирует его в base64
         :param payload: Полезная нагрузка, данные, которые должны быть переданы в токене
         :return: Готовый закодированный токен
         """
-        private_key: str = (
-            JWTSettings.private_key.read_text()
-        )  # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла private.pem
+        private_key: str = jwt_settings.private_key.read_text() # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла private.pem
 
-        algorithm: str = (
-            JWTSettings.algorithm
-        )  # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
+        algorithm: str = jwt_settings.algorithm # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
 
-        # Для того чтобы выдать токен, который будет иметь срок действия в минутах,
-        # начиная с времени выдачинам нужно получить текущее время и прибавить к нему время действия токена, указанное в настройках
-
-        now = datetime.now(timezone.utc)  # Получвем текущее время
-
-        expire_minutes: int = (
-            JWTSettings.access_token_expire
-        )  # Получаем Срок действия access токена в минутах из настроек
-
-        expire = now + timedelta(
-            minutes=expire_minutes
-        )  # Прибавляем к текущему времени now время действия токена, указанное в настройках
+        expire, now = JWTUtils.expire_jwt() # Получаем срок действия токена в минутах, остчет расчитан от времени его выдачи
 
         # Формируем измененный payload с добавленным сроком действия access токена
-        payload_copy = (
-            payload.copy()
-        )  # Копируем, полукченный от клиента, payload чтобы не изменять оригинальный
+        payload_copy = payload.copy() # Копируем, полукченный от клиента, payload чтобы не изменять оригинальный
 
         # В скопированный payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
         # и ключ iat, в котором указано когда токен был выпущен
         payload_copy.update(exp=expire, iat=now)
 
-        encode = jwt.encode(  # Собираем токен во едино
+        encode = jwt.encode( # Собираем токен во едино
             payload=payload_copy,
             key=private_key,
             algorithm=algorithm,
@@ -63,61 +52,56 @@ class JWTUtils:
 
         return encode
 
-    @staticmethod
+
     def decode_jwt(token: str) -> str:
         """
         Декодирует полученный токен
         :param token: Закодированный в base64 токен
         :return: Раскодированные данные, переданные в токене ( Head.Payload.Signature)
         """
-        public_key: str = (
-            JWTSettings.public_key.read_text(),
-        )  # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла public.pem
+        public_key: str = jwt_settings.public_key.read_text() # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла jwt-public.pem
 
-        algoritm: str = (
-            JWTSettings.algoritm,
-        )  # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
+        algoritm: str = jwt_settings.algorithm # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
 
         decode = jwt.decode(
             jwt=token,
             key=public_key,
-            algorithms=[
-                algoritm
-            ],  # Алгоритм передается в виде списка, поскольку параметр ожидается типа Sequence
+            algorithms=[algoritm], # Алгоритм передается в виде списка, поскольку параметр ожидается типа Sequence
         )
 
         return decode
+    
 
-    @staticmethod
+class AuthUtils:
+    
     def hash_password(password: str) -> bytes:
         """
         Хэширует полученный, в формате строки, пароль в байты
         :param password: Пароль в формате строки
         :return: Пароль в формате байтов
         """
-        salt = (
-            bcrypt.gensalt()
-        )  # генерирует соль — случайную последовательность байтов, которая добавляется к паролю перед хэшированием.
-        password_bytes: bytes = password.encode()  # Переводим пароль из строки в байты
-        return bcrypt.hashpw(
-            password_bytes, salt
-        )  # При помощи метода hashpw создаем хэшированный пароль из 2 компонентов password_bytes и salt
+        salt = bcrypt.gensalt() # генерирует соль — случайную последовательность байтов, которая добавляется к паролю перед хэшированием.
 
-    @staticmethod
+        password_bytes: bytes = password.encode() # Переводим пароль из строки в байты
+
+        return bcrypt.hashpw(password_bytes, salt) # При помощи метода hashpw создаем хэшированный пароль из 2 компонентов password_bytes и salt
+    
+
     def validate_password(
-        password: str,
-        hashed_password: bytes,
-    ) -> bool:
+            password: str,
+            hashed_password: bytes,
+        ) -> bool:
         """
         Проверяет соответствие, введенного пользователем, пароля в виде строки сохраненному паролю в байтах
         :param password: Полученный от пользователя пароль
         :param hashed_password: Сохраненный пароль пользователя при регистрации
         :return: True | False
         """
-        return bcrypt.checkpw(
-            password=password.encode(),  # Переводим пароль в байты
-            hashed_password=hashed_password,
+        return bcrypt.checkpw( # Проверяет соответствие, введенного пользователем, пароля в виде строки сохраненному паролю в байтах 
+            password=password.encode(), # Переводим полученный от пользователя в байты и передаем в метод
+            hashed_password=hashed_password # # Передаем хэшированный пароль пользователя, сохнаненный в базе
         )
+
 
     # @staticmethod
     # def validate_user_auth(
@@ -156,8 +140,3 @@ class JWTUtils:
     #         raise inactive
 
     #     return user # Возвращает данные пользователя если проверки пройдены
-    
-
-
-
-
