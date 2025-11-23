@@ -1,13 +1,24 @@
 from datetime import datetime, timedelta, timezone
 import bcrypt
-from auth.JWT.schemas.user import UserSchema
+from auth.JWT.schemas.user import UserPublicSchema, UserSchema
+from auth.JWT.exeption import DBExeption
 import jwt
 from auth.JWT.settings import jwt_settings
+from fastapi import Form, Depends
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+
+
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/login') # Это объект зависимости FastAPI, который не создаёт токены сам, а лишь извлекает токен из заголовка Authorization: Bearer <token> и возвращает его как строку. Параметр tokenUrl нужен Swagger UI для кнопки Authorize — чтобы знать, куда отправлять форму username/password и получать токен.
+
 
 
 
 class JWTUtils:
     """Содержит служебные утилиты для работы с jwt токеном"""
+
+    @staticmethod
     def expire_jwt() -> dict:
         """
         Определяет время действия токена в минутах
@@ -18,62 +29,74 @@ class JWTUtils:
 
         now = datetime.now(timezone.utc) # Получвем текущее время
 
-        expire_minutes: int = jwt_settings.access_token_expire # Получаем Срок действия access токена в минутах из настроек
+        expire = now + timedelta(minutes=jwt_settings.access_token_expire) # Прибавляем к текущему времени now время действия токена, указанное в настройках
 
-        expire = now + timedelta(minutes=expire_minutes) # Прибавляем к текущему времени now время действия токена, указанное в настройках
+        # JWT ожидает числа секунд от Unix Epoch, а не объекты datetime, поэтому применяем метод timestamp к полученным данным,
+        # а поскольку timestamp возвращает float тип нам нужно перевести его в int
+        return { # Создаем готовый словарь, данные из которого нужно будет добавить в payload
+            "exp": int(expire.timestamp()), # срок действия access токена, начиная с времени выполнения этого метода 
+            "iat": int(now.timestamp()) # ключ iat, в котором указано когда токен был выпущен
+        }
 
-        return expire, now
 
-
+    @staticmethod
     def encode_jwt(payload: dict) -> str:
         """
         Собирает токен из полученных данных и кодирует его в base64
         :param payload: Полезная нагрузка, данные, которые должны быть переданы в токене
         :return: Готовый закодированный токен
         """
-        private_key: str = jwt_settings.private_key.read_text() # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла private.pem
-
-        algorithm: str = jwt_settings.algorithm # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
-
-        expire, now = JWTUtils.expire_jwt() # Получаем срок действия токена в минутах, остчет расчитан от времени его выдачи
-
-        # Формируем измененный payload с добавленным сроком действия access токена
         payload_copy = payload.copy() # Копируем, полукченный от клиента, payload чтобы не изменять оригинальный
 
         # В скопированный payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
         # и ключ iat, в котором указано когда токен был выпущен
-        payload_copy.update(exp=expire, iat=now)
+        payload_copy.update(JWTUtils.expire_jwt()) # Метод update обовит payload_copy денными из словаря, который возвращает метод expire_jwt, тоеть добавит в payload_copy новые ключи и их значения
 
-        encode = jwt.encode( # Собираем токен во едино
-            payload=payload_copy,
-            key=private_key,
-            algorithm=algorithm,
+        token = jwt.encode( # Собираем токен во едино
+            payload=payload_copy, # Скопированный payload с добавленными ключами exp и iat и их значениями
+            key=jwt_settings.private_key.read_text(), # Приватный ключ для кодирования
+            algorithm=jwt_settings.algorithm, # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
         )
 
-        return encode
+        return token
 
 
+    @staticmethod
     def decode_jwt(token: str) -> str:
         """
         Декодирует полученный токен
         :param token: Закодированный в base64 токен
-        :return: Раскодированные данные, переданные в токене ( Head.Payload.Signature)
+        :return: Раскодированные данные, переданные в токене payload
         """
-        public_key: str = jwt_settings.public_key.read_text() # Метод read_text библиотеки pathlib позволяет автоматически прочитать содержимое файла jwt-public.pem
-
-        algoritm: str = jwt_settings.algorithm # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
-
-        decode = jwt.decode(
-            jwt=token,
-            key=public_key,
-            algorithms=[algoritm], # Алгоритм передается в виде списка, поскольку параметр ожидается типа Sequence
+        payload = jwt.decode( # Достаем payload из токена
+            jwt=token, # Токен в виде строки
+            key=jwt_settings.public_key.read_text(), # Публичный ключ для декодирования
+            algorithms=[jwt_settings.algorithm], # Алгоритм передается в виде списка, поскольку параметр ожидается типа Sequence
         )
 
-        return decode
+        return payload
     
 
+
+
 class AuthUtils:
-    
+
+
+    @staticmethod
+    def check_user_status(user: UserSchema) -> UserSchema:
+        """
+        Проверяет статус пользователя, возвращает его же если статус не False, то есть пользователеь не заблокипран иначе выбрасывает исключение
+        :param user: Пользователь из БД
+        :return: Возвращает пользователя
+        """
+        if user.active == False: # Проверяет статус пользователя, если False - выбрасывает исключение
+
+            raise DBExeption.inactive
+
+        return user
+
+
+    @staticmethod
     def hash_password(password: str) -> bytes:
         """
         Хэширует полученный, в формате строки, пароль в байты
@@ -87,10 +110,11 @@ class AuthUtils:
         return bcrypt.hashpw(password_bytes, salt) # При помощи метода hashpw создаем хэшированный пароль из 2 компонентов password_bytes и salt
     
 
+    @staticmethod
     def validate_password(
-            password: str,
-            hashed_password: bytes,
-        ) -> bool:
+        password: str,
+        hashed_password: bytes,
+    ) -> bool:
         """
         Проверяет соответствие, введенного пользователем, пароля в виде строки сохраненному паролю в байтах
         :param password: Полученный от пользователя пароль
@@ -103,40 +127,69 @@ class AuthUtils:
         )
 
 
-    # @staticmethod
-    # def validate_user_auth(
-    #     login: str = Form(),
-    #     password: str = Form(),
-    # ) -> UserSchema:
-    #     """
-    #     Выполняет валидацию пользователя, если все проверки пройдены то возвращает его
-    #     :param login: Логин пользователя введенный в форме
-    #     :param password: пароль пользователя введенный в форме
-    #     :return: Пользователя
-    #     """
-    #     unauthorized = HTTPException(
-    #         status_code=status.HTTP_401_UNAUTHORIZED,
-    #         detail="Invalid login or password",
-    #     )
+    @staticmethod
+    def validate_user_auth(form_data: OAuth2PasswordRequestForm = Depends()) -> UserSchema:
+        """
+        Выполняет валидацию пользователя, если все проверки пройдены то возвращает его
+        :param form_data: При помощи Depends() создается объект OAuth2PasswordRequestForm, содержащий данные, введенные в форме клиента form_data.username и form_data.password
+        :return: Пользователя
+        """
+        user = users_db.get(form_data.username) # Ищет пользователя по логину в базе, возвращает если находит его
 
-    #     inactive = HTTPException(
-    #         status_code=status.HTTP_403_FORBIDDEN,
-    #         detail="User inactive",
-    #     )
+        if not user: # Если пользователя в БД нет - выбрасывает исключение
+            raise DBExeption.unauthorized
 
-    #     user = users_db.get(login) # Ищет пользователя по логину в базе, возвращает если находит его
+        if not AuthUtils.validate_password( # Если пользователь найден, то сравнивает пароли: через метод validate_password хэширует полученный пароль и сравнивает с захэшированным паролем в БД
+            password=form_data.password,
+            hashed_password=user.password,
+        ):
+            raise DBExeption.unauthorized # Если захэшированные пароли не совпадают - выбрасывает исключение
 
-    #     if not user: # Если пользователя нет - выбрасывает исключение
-    #         raise unauthorized
+        return AuthUtils.check_user_status(user)  # Проверяет статус пользователя, если True - возвращает пользователя, иначе выбросит исключение
 
-    #     if not JWTUtils.validate_password( # Если пользователь найден, то сравнивает пароли: через метод validate_password хэширует полученный пароль и сравнивает с захэшированным паролем в базе
-    #         password=password,
-    #         hashed_password=user.password,
-    #     ):
-    #         raise unauthorized # Если захэшированные пароли не совпадают - выбрасывает исключение
 
-    #     if user.active == False: # Проверяет статус пользователя, если False - выбрасывает исключение
 
-    #         raise inactive
+    @staticmethod
+    def get_current_user(token: str = Depends(oauth2_scheme)) -> UserPublicSchema:
+        """
+        Через зависимость oauth2_scheme извлекает токен из заголовка запроса, затем парсит данные, извлеченные из токена и выполняет проверки
+        :return: Возвращает пользователя, если такой существует в БД
+        """
+        payload = JWTUtils.decode_jwt(token) # Декодирует токен и достает payload
 
-    #     return user # Возвращает данные пользователя если проверки пройдены
+        user_name = payload.get('name') # Получает имя пользователя из payload
+        
+        user = users_db.get(user_name) # Проверяет наличие пользователя в БД по его имени
+
+        if not user:
+            raise DBExeption.not_found
+        
+        user = AuthUtils.check_user_status(user=user) # Проверяет статус пользователя, если True - возвращает пользователя, иначе выбросит исключение
+
+        return user
+
+
+    
+
+
+
+
+# Создаем 2 юзеров для примера
+bob = UserSchema(
+    id=1,
+    name='Bob',
+    password=AuthUtils.hash_password('qwerty'),
+    email='asd@gmail.com'
+)
+
+sam = UserSchema(
+    id=2,
+    name='Sam',
+    password=AuthUtils.hash_password('asdfg')
+)
+
+# Создаем базу данных, с диначиским ключем, равным именю пользователя из схемы и схемой в качестве значения
+users_db: dict[str, UserSchema] = {
+    bob.name: bob,
+    sam.name : sam,
+}

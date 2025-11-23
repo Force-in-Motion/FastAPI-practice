@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from pathlib import Path
 
 JWT_DIR = Path(__file__).parent
-print(JWT_DIR)
+
 
 
 class JWTSettings(BaseModel):
@@ -14,7 +14,7 @@ class JWTSettings(BaseModel):
 
     algorithm: str = "RS256"
 
-    access_token_expire: int = 3
+    access_token_expire: int = 15
 
     refresh_token_expire: int = 60
 
