@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from turtle import st
 import bcrypt
 from auth.JWT.schemas.user import UserPublicSchema, UserSchema
 from auth.JWT.exeption import DBExeption
@@ -19,9 +20,10 @@ class JWTUtils:
     """Содержит служебные утилиты для работы с jwt токеном"""
 
     @staticmethod
-    def expire_jwt() -> dict:
+    def expire_jwt(expire_minuts: int) -> dict:
         """
-        Определяет время действия токена в минутах
+        Возвращает время действия refresh  или access токена
+        :param expire_minuts: Определяет время действия токена в минутах в зависимости от от переданных настроек ( access_token_expire: int = 15 или refresh_token_expire: int = 60 * 24 * 30 )
         :return: время действия токена в минутах и текущее время
         """
         # Для того чтобы выдать токен, который будет иметь срок действия в минутах,
@@ -29,7 +31,7 @@ class JWTUtils:
 
         now = datetime.now(timezone.utc) # Получвем текущее время
 
-        expire = now + timedelta(minutes=jwt_settings.access_token_expire) # Прибавляем к текущему времени now время действия токена, указанное в настройках
+        expire = now + timedelta(minutes=expire_minuts) # Прибавляем к текущему времени now время действия токена, указанное в настройках
 
         # JWT ожидает числа секунд от Unix Epoch, а не объекты datetime, поэтому применяем метод timestamp к полученным данным,
         # а поскольку timestamp возвращает float тип нам нужно перевести его в int
@@ -46,14 +48,8 @@ class JWTUtils:
         :param payload: Полезная нагрузка, данные, которые должны быть переданы в токене
         :return: Готовый закодированный токен
         """
-        payload_copy = payload.copy() # Копируем, полукченный от клиента, payload чтобы не изменять оригинальный
-
-        # В скопированный payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
-        # и ключ iat, в котором указано когда токен был выпущен
-        payload_copy.update(JWTUtils.expire_jwt()) # Метод update обовит payload_copy денными из словаря, который возвращает метод expire_jwt, тоеть добавит в payload_copy новые ключи и их значения
-
         token = jwt.encode( # Собираем токен во едино
-            payload=payload_copy, # Скопированный payload с добавленными ключами exp и iat и их значениями
+            payload=payload, # Скопированный payload с добавленными ключами exp и iat и их значениями
             key=jwt_settings.private_key.read_text(), # Приватный ключ для кодирования
             algorithm=jwt_settings.algorithm, # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
         )
@@ -76,6 +72,54 @@ class JWTUtils:
 
         return payload
     
+
+    @staticmethod
+    def create_jwt(
+        user: UserSchema,
+        token_type: str,
+        expire_minuts: int
+    ) -> str:
+        """
+        
+        :param user:
+        :return:
+        """
+        payload = {'token_type': token_type, "sub": str(user.id), "name": user.name, "emmail": user.email}
+
+        # В payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
+        # и ключ iat, в котором указано когда токен был выпущен
+        payload.update(JWTUtils.expire_jwt(expire_minuts=expire_minuts)) # Метод update обовит payload_copy денными из словаря, который возвращает метод expire_jwt, то есть добавит в payload_copy новые ключи и их значения
+
+        # Генерирует access_token (токен короткого срока действия), для создания токена необходимо передать payload ( полезную нагрузку )
+        return JWTUtils.encode_jwt(payload)
+
+
+    @staticmethod
+    def create_access_token(user: UserSchema) -> str:
+        """
+        Декодирует полученный токен
+        :param token: Закодированный в base64 токен
+        :return: Раскодированные данные, переданные в токене payload
+        """
+        return JWTUtils.create_jwt(
+            user=user,
+            token_type=jwt_settings.access_name,
+            expire_minuts=jwt_settings.access_token_expire)
+
+
+    @staticmethod
+    def create_refresh_token(user: UserSchema) -> str:
+        """
+        Декодирует полученный токен
+        :param token: Закодированный в base64 токен
+        :return: Раскодированные данные, переданные в токене payload
+        """
+        return JWTUtils.create_jwt(
+            user=user,
+            token_type=jwt_settings.refresh_name,
+            expire_minuts=jwt_settings.refresh_token_expire)
+
+
 
 
 

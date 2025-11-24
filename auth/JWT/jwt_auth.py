@@ -18,22 +18,23 @@ async def issues_jwt_to_user(user: UserSchema = Depends(AuthUtils.validate_user_
     :param param:
     :return:
     """
-    payload = {"sub": str(user.id), "name": user.name, "emmail": user.email}
+    access_token = JWTUtils.create_access_token(user=user)
 
-    # Генерирует access_token (токен короткого срока действия), для создания токена необходимо передать payload ( полезную нагрузку )
-    access_token = JWTUtils.encode_jwt(payload)
+    refresh_token = JWTUtils.create_refresh_token(user=user)
 
-    return TokenSchema(access_token=access_token, type_token="Bearer")
+    return TokenSchema(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
 
 
-
-@router.get('/me', response_model=UserPublicSchema)
-async def get_user_profile(user: UserPublicSchema = Depends(AuthUtils.get_current_user)):
+@router.get("/me", response_model=UserPublicSchema)
+async def get_user_profile(
+    user: UserPublicSchema = Depends(AuthUtils.get_current_user),
+):
     """
     Предоставляет пользователю доступ к своим данным в случае успешной проверки данных в токене через зависимость get_current_user
     :param user:
     :return:
     """
     return user
-
-

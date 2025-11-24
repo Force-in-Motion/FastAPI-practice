@@ -14,9 +14,13 @@ class JWTSettings(BaseModel):
 
     algorithm: str = "RS256"
 
-    access_token_expire: int = 15
+    access_token_expire: int = 15 # Срок действия токена в минутах
 
-    refresh_token_expire: int = 60
+    refresh_token_expire: int = 60 * 24 * 30 # Срок действия токена в минутах ( на месяц )
+
+    access_name = 'access'
+
+    refresh_name = 'refresh'
 
 
 jwt_settings = JWTSettings()
