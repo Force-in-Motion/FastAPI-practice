@@ -3,10 +3,13 @@
 
 from auth.JWT.schemas.token import TokenSchema
 from auth.JWT.schemas.user import UserPublicSchema, UserSchema
-from auth.JWT.utils import JWTUtils, AuthUtils, UserDataParser
+from auth.JWT.utils import JWTUtils, AuthUtils
 from fastapi import APIRouter, Depends
 
+
+
 router = APIRouter(tags=["JWT"])
+
 
 
 @router.post("/login", response_model=TokenSchema)

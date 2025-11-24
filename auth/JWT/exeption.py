@@ -20,5 +20,5 @@ class DBExeption(Exception):
 
     token_invalid = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="User not found",
+        detail="Invalid token type",
     )

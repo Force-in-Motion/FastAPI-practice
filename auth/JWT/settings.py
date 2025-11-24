@@ -18,9 +18,9 @@ class JWTSettings(BaseModel):
 
     refresh_token_expire: int = 60 * 24 * 30 # Срок действия токена в минутах ( на месяц )
 
-    access_name = 'access'
+    access_name: str = 'access'
 
-    refresh_name = 'refresh'
+    refresh_name: str = 'refresh'
 
 
 jwt_settings = JWTSettings()

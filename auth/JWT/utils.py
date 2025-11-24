@@ -1,11 +1,10 @@
 from datetime import datetime, timedelta, timezone
-from turtle import st
 import bcrypt
+import jwt
 from auth.JWT.schemas.user import UserPublicSchema, UserSchema
 from auth.JWT.exeption import DBExeption
-import jwt
 from auth.JWT.settings import jwt_settings
-from fastapi import Form, Depends
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
 
@@ -84,7 +83,7 @@ class JWTUtils:
         :param user:
         :return:
         """
-        payload = {'token_type': token_type, "sub": str(user.id), "name": user.name, "emmail": user.email}
+        payload = {'type': token_type, "sub": str(user.id), "name": user.name, "emmail": user.email}
 
         # В payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
         # и ключ iat, в котором указано когда токен был выпущен
@@ -138,6 +137,21 @@ class AuthUtils:
             raise DBExeption.inactive
 
         return user
+    
+
+    @staticmethod
+    def check_token_type(payload: dict) -> None:
+        """
+        Проверяет статус пользователя, возвращает его же если статус не False, то есть пользователеь не заблокипран иначе выбрасывает исключение
+        :param user: Пользователь из БД
+        :return: Возвращает пользователя
+        """
+        token_type = payload.get('type')
+
+        if token_type != jwt_settings.access_name:
+
+            raise DBExeption.token_invalid
+
 
 
     @staticmethod
@@ -200,6 +214,8 @@ class AuthUtils:
         :return: Возвращает пользователя, если такой существует в БД
         """
         payload = JWTUtils.decode_jwt(token) # Декодирует токен и достает payload
+
+        AuthUtils.check_token_type(payload=payload)
 
         user_name = payload.get('name') # Получает имя пользователя из payload
         
