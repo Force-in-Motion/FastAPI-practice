@@ -46,23 +46,30 @@ openssl rsa -in private.pem -outform PEM -pubout -out public.pem
 from pydantic import BaseModel
 from pathlib import Path
 
-JWT_DIR = Path(__file__).parent # Через библиотеку pathlib получаем корневую папку проекта
+JWT_DIR = Path(__file__).parent
+
 
 
 class JWTSettings(BaseModel):
-    """ Определяет пути к файлам, содержащим публичный и привытный ключи """
+    """Определяет пути к файлам, содержащим публичный и привытный ключи"""
 
-    private_key: Path = JWT_DIR / 'keys' / 'jwt_private.pem' # Путь к приватному ключу
+    private_key: Path = JWT_DIR / "keys" / "private.pem" # Путь к приватному ключу
 
-    public_key: Path = JWT_DIR / 'keys' / 'jwt_public.pem' # Путь к публичному ключу
+    public_key: Path = JWT_DIR / "keys" / "public.pem" # Путь к публичному ключу
 
-    algoritm: str = 'RS256' # Задаем алгоритм шифрования 
+    algorithm: str = "RS256" # Задаем алгоритм шифрования 
 
-    access_token: int = 3 # Определяем время действия access токена в минутах 
-    
-    refresh_token: int = 60 # Определяем время действия refresh токена в минутах
+    access_token_expire: int = 15 # Срок действия токена в минутах
+
+    refresh_token_expire: int = 60 * 24 * 30 # Срок действия токена в минутах ( на месяц )
+
+    access_name: str = 'access'
+
+    refresh_name: str = 'refresh'
+
 
 jwt_settings = JWTSettings()
+
 
 # =========================================================================================================
 
@@ -96,44 +103,43 @@ class DBExeption(Exception):
 
 from datetime import datetime, timedelta, timezone
 import bcrypt
+import jwt
 from auth.JWT.schemas.user import UserPublicSchema, UserSchema
 from auth.JWT.exeption import DBExeption
-import jwt
 from auth.JWT.settings import jwt_settings
-from fastapi import Form, Depends
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
 
-
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/login') # Это объект зависимости FastAPI, который не создаёт токены сам, а лишь извлекает токен из заголовка Authorization: Bearer <token> и возвращает его как строку. Параметр tokenUrl нужен Swagger UI для кнопки Authorize — чтобы знать, куда отправлять форму username/password и получать токен.
-
-
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")  # Это объект зависимости FastAPI, который не создаёт токены сам, а лишь извлекает токен из заголовка Authorization: Bearer <token> и возвращает его как строку. Параметр tokenUrl нужен Swagger UI для кнопки Authorize — чтобы знать, куда отправлять форму username/password и получать токен.
 
 
 class JWTUtils:
     """Содержит служебные утилиты для работы с jwt токеном"""
 
+
     @staticmethod
-    def expire_jwt() -> dict:
+    def expire_jwt(expire_minuts: int) -> dict:
         """
-        Определяет время действия токена в минутах
+        Возвращает время действия refresh  или access токена
+        :param expire_minuts: Определяет время действия токена в минутах в зависимости от от переданных настроек ( access_token_expire: int = 15 или refresh_token_expire: int = 60 * 24 * 30 )
         :return: время действия токена в минутах и текущее время
         """
+
         # Для того чтобы выдать токен, который будет иметь срок действия в минутах,
         # начиная с времени выдачинам нужно получить текущее время и прибавить к нему время действия токена, указанное в настройках
 
-        now = datetime.now(timezone.utc) # Получвем текущее время
+        now = datetime.now(timezone.utc)  # Получвем текущее время
 
-        expire = now + timedelta(minutes=jwt_settings.access_token_expire) # Прибавляем к текущему времени now время действия токена, указанное в настройках
+        expire = now + timedelta(minutes=expire_minuts)  # Прибавляем к текущему времени now время действия токена, указанное в настройках
 
         # JWT ожидает числа секунд от Unix Epoch, а не объекты datetime, поэтому применяем метод timestamp к полученным данным,
         # а поскольку timestamp возвращает float тип нам нужно перевести его в int
-        return { # Создаем готовый словарь, данные из которого нужно будет добавить в payload
-            "exp": int(expire.timestamp()), # срок действия access токена, начиная с времени выполнения этого метода 
-            "iat": int(now.timestamp()) # ключ iat, в котором указано когда токен был выпущен
+        return {  # Создаем готовый словарь, данные из которого нужно будет добавить в payload
+            "exp": int(expire.timestamp()),  # срок действия access токена, начиная с времени выполнения этого метода
+            "iat": int(now.timestamp()),  # ключ iat, в котором указано когда токен был выпущен
         }
-
+    
 
     @staticmethod
     def encode_jwt(payload: dict) -> str:
@@ -142,16 +148,10 @@ class JWTUtils:
         :param payload: Полезная нагрузка, данные, которые должны быть переданы в токене
         :return: Готовый закодированный токен
         """
-        payload_copy = payload.copy() # Копируем, полукченный от клиента, payload чтобы не изменять оригинальный
-
-        # В скопированный payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
-        # и ключ iat, в котором указано когда токен был выпущен
-        payload_copy.update(JWTUtils.expire_jwt()) # Метод update обовит payload_copy денными из словаря, который возвращает метод expire_jwt, тоеть добавит в payload_copy новые ключи и их значения
-
-        token = jwt.encode( # Собираем токен во едино
-            payload=payload_copy, # Скопированный payload с добавленными ключами exp и iat и их значениями
-            key=jwt_settings.private_key.read_text(), # Приватный ключ для кодирования
-            algorithm=jwt_settings.algorithm, # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
+        token = jwt.encode(  # Собираем токен во едино
+            payload=payload,  # Скопированный payload с добавленными ключами exp и iat и их значениями
+            key=jwt_settings.private_key.read_text(),  # Приватный ключ для кодирования
+            algorithm=jwt_settings.algorithm,  # Алгоритм шифрования токена, в данном случае ассиметричный ( участвуют приватный и публичный ключи )
         )
 
         return token
@@ -164,32 +164,72 @@ class JWTUtils:
         :param token: Закодированный в base64 токен
         :return: Раскодированные данные, переданные в токене payload
         """
-        payload = jwt.decode( # Достаем payload из токена
-            jwt=token, # Токен в виде строки
-            key=jwt_settings.public_key.read_text(), # Публичный ключ для декодирования
-            algorithms=[jwt_settings.algorithm], # Алгоритм передается в виде списка, поскольку параметр ожидается типа Sequence
+        payload = jwt.decode(  # Достаем payload из токена
+            jwt=token,  # Токен в виде строки
+            key=jwt_settings.public_key.read_text(),  # Публичный ключ для декодирования
+            algorithms=[jwt_settings.algorithm],  # Алгоритм передается в виде списка, поскольку параметр ожидается типа Sequence
         )
 
         return payload
-    
+
+
+    @staticmethod
+    def create_jwt(
+        user: UserSchema,
+        token_type: str,
+        expire_minuts: int
+    ) -> str:
+        """
+        Создает access или refresh токен, в записимости от полученного типа и срока действия
+        :param user: схема пользователя с данными изи БД
+        :return: Закодированный токен 
+        """
+        payload = {
+            "type": token_type,
+            "sub": str(user.id),
+            "name": user.name,
+            "emmail": user.email,
+        }
+
+        # В payload добавляем новый ключ exp со значнием expire ( срок действия access токена, начиная с времени выполнения этого метода )
+        # и ключ iat, в котором указано когда токен был выпущен
+        payload.update(JWTUtils.expire_jwt(expire_minuts=expire_minuts))  # Метод update обовит payload_copy денными из словаря, который возвращает метод expire_jwt, то есть добавит в payload_copy новые ключи и их значения
+
+        # Генерирует access_token (токен короткого срока действия), для создания токена необходимо передать payload ( полезную нагрузку )
+        return JWTUtils.encode_jwt(payload)
+
+
+    @staticmethod
+    def create_access_token(user: UserSchema) -> str:
+        """
+        Создает конкретно access_token
+        :param user: схема пользователя с данными изи БД
+        :return: access_token
+        """
+        return JWTUtils.create_jwt(
+            user=user,
+            token_type=jwt_settings.access_name,
+            expire_minuts=jwt_settings.access_token_expire,
+        )
+
+
+    @staticmethod
+    def create_refresh_token(user: UserSchema) -> str:
+        """
+        Создает конкретно refresh_token
+        :param user: схема пользователя с данными изи БД
+        :return: refresh_token
+        """
+        return JWTUtils.create_jwt(
+            user=user,
+            token_type=jwt_settings.refresh_name,
+            expire_minuts=jwt_settings.refresh_token_expire,
+        )
+
 
 
 
 class AuthUtils:
-
-
-    @staticmethod
-    def check_user_status(user: UserSchema) -> UserSchema:
-        """
-        Проверяет статус пользователя, возвращает его же если статус не False, то есть пользователеь не заблокипран иначе выбрасывает исключение
-        :param user: Пользователь из БД
-        :return: Возвращает пользователя
-        """
-        if user.active == False: # Проверяет статус пользователя, если False - выбрасывает исключение
-
-            raise DBExeption.inactive
-
-        return user
 
 
     @staticmethod
@@ -199,15 +239,15 @@ class AuthUtils:
         :param password: Пароль в формате строки
         :return: Пароль в формате байтов
         """
-        salt = bcrypt.gensalt() # генерирует соль — случайную последовательность байтов, которая добавляется к паролю перед хэшированием.
+        salt = (bcrypt.gensalt())  # генерирует соль — случайную последовательность байтов, которая добавляется к паролю перед хэшированием.
 
-        password_bytes: bytes = password.encode() # Переводим пароль из строки в байты
+        password_bytes: bytes = password.encode()  # Переводим пароль из строки в байты
 
-        return bcrypt.hashpw(password_bytes, salt) # При помощи метода hashpw создаем хэшированный пароль из 2 компонентов password_bytes и salt
-    
+        return bcrypt.hashpw(password_bytes, salt)  # При помощи метода hashpw создаем хэшированный пароль из 2 компонентов password_bytes и salt
+
 
     @staticmethod
-    def validate_password(
+    def check_password(
         password: str,
         hashed_password: bytes,
     ) -> bool:
@@ -217,52 +257,126 @@ class AuthUtils:
         :param hashed_password: Сохраненный пароль пользователя при регистрации
         :return: True | False
         """
-        return bcrypt.checkpw( # Проверяет соответствие, введенного пользователем, пароля в виде строки сохраненному паролю в байтах 
-            password=password.encode(), # Переводим полученный от пользователя в байты и передаем в метод
-            hashed_password=hashed_password # # Передаем хэшированный пароль пользователя, сохнаненный в базе
+        return bcrypt.checkpw(  # Проверяет соответствие, введенного пользователем, пароля в виде строки сохраненному паролю в байтах
+            password=password.encode(),  # Переводим полученный от пользователя пароль в байты и передаем в метод
+            hashed_password=hashed_password,  # # Передаем хэшированный пароль пользователя, сохнаненный в БД
         )
+    
+
+    @staticmethod
+    def check_current_user(username: str) -> UserPublicSchema:
+        """
+        Проверяет наличие полученного пользователя в базе по его имени
+        :param username: имя пользователя
+        :return: найденного по username
+        """
+        user = users_db.get(username)  # Ищет пользователя по логину в базе, возвращает если находит его
+
+        if not user:  # Если пользователя в БД нет - выбрасывает исключение
+            raise DBExeption.unauthorized
+
+        return user
 
 
     @staticmethod
-    def validate_user_auth(form_data: OAuth2PasswordRequestForm = Depends()) -> UserSchema:
+    def check_user_status(user: UserSchema) -> UserSchema:
+        """
+        Проверяет статус пользователя, возвращает его же если статус не False, то есть пользователеь не заблокипран иначе выбрасывает исключение
+        :param user: Пользователь из БД
+        :return: Возвращает пользователя
+        """
+        if (user.active == False):  # Проверяет статус пользователя, если False - выбрасывает исключение
+
+            raise DBExeption.inactive
+
+        return user
+
+
+    @staticmethod
+    def check_token_type(payload: dict, token_type: str) -> bool:
+        """
+        Проверяет тип полученного токена на соответствие тому, который указан в полученном payload
+        :param payload: Полезная нагрузка, полученная из токена
+        :return: bool
+        """
+        if payload.get("type") == token_type:
+            return True
+
+        raise DBExeption.token_invalid 
+    
+
+    @staticmethod
+    def validate_user(form_data: OAuth2PasswordRequestForm = Depends()) -> UserSchema:
         """
         Выполняет валидацию пользователя, если все проверки пройдены то возвращает его
         :param form_data: При помощи Depends() создается объект OAuth2PasswordRequestForm, содержащий данные, введенные в форме клиента form_data.username и form_data.password
         :return: Пользователя
         """
-        user = users_db.get(form_data.username) # Ищет пользователя по логину в базе, возвращает если находит его
+        user = AuthUtils.check_current_user(form_data.username) # Проверка наличия пользователя в базе по его имени 
 
-        if not user: # Если пользователя в БД нет - выбрасывает исключение
-            raise DBExeption.unauthorized
-
-        if not AuthUtils.validate_password( # Если пользователь найден, то сравнивает пароли: через метод validate_password хэширует полученный пароль и сравнивает с захэшированным паролем в БД
+        if not AuthUtils.check_password(  # Сравнивает пароли: через метод validate_password хэширует полученный пароль и сравнивает с захэшированным паролем в БД
             password=form_data.password,
             hashed_password=user.password,
         ):
-            raise DBExeption.unauthorized # Если захэшированные пароли не совпадают - выбрасывает исключение
+            raise DBExeption.unauthorized  # Если захэшированные пароли не совпадают - выбрасывает исключение
 
         return AuthUtils.check_user_status(user)  # Проверяет статус пользователя, если True - возвращает пользователя, иначе выбросит исключение
 
 
+    @staticmethod
+    def get_current_user_by_access(token: str = Depends(oauth2_scheme)) -> UserPublicSchema:
+        """
+        Через зависимость oauth2_scheme извлекает токен из заголовка запроса, затем парсит данные, извлеченные из токена и выполняет проверки
+        :param token: Токен, полученный через зависимость из заголовка запроса
+        :return: Возвращает пользователя, если такой существует в БД
+        """
+        payload = JWTUtils.decode_jwt(token)  # Декодирует токен и достает payload
+
+        AuthUtils.check_token_type(payload=payload, token_type=jwt_settings.access_name) # Проверяет тип токена в payload на соответствие переданному в jwt_settings.access_name
+
+        username = payload.get("name")  # Получает имя пользователя из payload
+
+        user = AuthUtils.check_current_user(username) # Проверка наличия пользователя в базе по его имени 
+
+        user = AuthUtils.check_user_status(user=user)  # Проверяет статус пользователя, если True - возвращает пользователя, иначе выбросит исключение
+
+        return user
+
+
 
     @staticmethod
-    def get_current_user(token: str = Depends(oauth2_scheme)) -> UserPublicSchema:
+    def get_current_user_by_refresh(token: str = Depends(oauth2_scheme)) -> UserPublicSchema:
         """
         Через зависимость oauth2_scheme извлекает токен из заголовка запроса, затем парсит данные, извлеченные из токена и выполняет проверки
         :return: Возвращает пользователя, если такой существует в БД
         """
-        payload = JWTUtils.decode_jwt(token) # Декодирует токен и достает payload
+        payload = JWTUtils.decode_jwt(token)  # Декодирует токен и достает payload
 
-        user_name = payload.get('name') # Получает имя пользователя из payload
-        
-        user = users_db.get(user_name) # Проверяет наличие пользователя в БД по его имени
+        AuthUtils.check_token_type(payload=payload, token_type=jwt_settings.refresh_name) # Проверяет тип токена в payload на соответствие переданному в jwt_settings.access_name
 
-        if not user:
-            raise DBExeption.not_found
-        
-        user = AuthUtils.check_user_status(user=user) # Проверяет статус пользователя, если True - возвращает пользователя, иначе выбросит исключение
+        username = payload.get("name")  # Получает имя пользователя из payload
+ 
+        user = AuthUtils.check_current_user(username) # Проверка наличия пользователя в базе по его имени 
+
+        user = AuthUtils.check_user_status(user=user)  # Проверяет статус пользователя, если True - возвращает пользователя, иначе выбросит исключение
 
         return user
+    
+
+
+# Создаем 2 юзеров для примера
+bob = UserSchema(
+    id=1, name="Bob", password=AuthUtils.hash_password("qwerty"), email="asd@gmail.com"
+)
+
+sam = UserSchema(id=2, name="Sam", password=AuthUtils.hash_password("asdfg"))
+
+# Создаем базу данных, с диначиским ключем, равным именю пользователя из схемы и схемой в качестве значения
+users_db: dict[str, UserSchema] = {
+    bob.name: bob,
+    sam.name: sam,
+}
+
 
 
 # ====================================================================================================================
@@ -271,8 +385,10 @@ class AuthUtils:
 # Параметр strict=True говорит что типы данных должны быть строго такими, какие указаны в анотации к параметрам схемы.
 # В обычном режиме → Pydantic преобразует "25" в 25. from_attributes=True Позволяет создавать модель из обычных объектов (ORM-объектов, классов, сущностей), а не только из словарей.
 
+from pydantic import BaseModel, ConfigDict, EmailStr
+
 class UserSchema(BaseModel):
-    model_config = ConfigDict(strict=True, from_attributes=True)
+    model_config = ConfigDict(strict=True, from_attributes=True) # Параметр strict=True говорит что типы данных должны быть строго такими, какие указаны в анотации к параметрам схемы. В обычном режиме → Pydantic преобразует "25" в 25. from_attributes=True Позволяет создавать модель из обычных объектов (ORM-объектов, классов, сущностей), а не только из словарей.
     id: int
     name: str
     password: bytes # Пароль будет захэширован в байты, поэтому в схеме мы храним сразу байты
@@ -282,58 +398,93 @@ class UserSchema(BaseModel):
 
 class UserPublicSchema(BaseModel):
     # Схема для отправки данных пользователю, передаем только безопасные данные исключая служебные, такие как пароль и статус
-    model_config = ConfigDict(strict=True, from_attributes=True)
+    model_config = ConfigDict(strict=True, from_attributes=True) # Параметр strict=True говорит что типы данных должны быть строго такими, какие указаны в анотации к параметрам схемы. В обычном режиме → Pydantic преобразует "25" в 25. from_attributes=True Позволяет создавать модель из обычных объектов (ORM-объектов, классов, сущностей), а не только из словарей.
     id: int
     name: str
     email: EmailStr | None = None
+
 # ======================================================================================================================
 
 # Далее необходимо создать схему токена
 
 class TokenSchema(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None  #  Параметр опциональный, поскольку не всегда нужно возвращать клиенту оба токена сразу
     type_token: str # Тип токена ( обычно Bearer )
 
 
 
 # =========================================================================================================================
 
-# Вью, выдающее access токен пользователю в случае успешной авторизации по логину и паролю
 
 from auth.JWT.schemas.token import TokenSchema
 from auth.JWT.schemas.user import UserPublicSchema, UserSchema
-from auth.JWT.utils import JWTUtils, AuthUtils, UserDataParser
+from auth.JWT.utils import JWTUtils, AuthUtils
 from fastapi import APIRouter, Depends
+from fastapi.security import HTTPBearer
 
-router = APIRouter(tags=["JWT"])
+
+http_bearer = HTTPBearer(auto_error=False)  # В свагер добавит новое поле (для тестирования), которое будет авторизовывать пользователя через токен
+
+router = APIRouter(
+    tags=["JWT"],
+    dependencies=[Depends(http_bearer)],  # http_bearer обязательно нужно добавить в зависимость роутера, чтобы он срабатывал по умолчанию при запуске роутера
+)
 
 
-@router.post("/login", response_model=TokenSchema)
-async def issues_jwt_to_user(user: UserSchema = Depends(AuthUtils.validate_user_auth)):
+@router.post(
+    "/login",
+    response_model=TokenSchema,
+)
+async def issues_acces_and_refresh_jwt_to_user(
+    user: UserSchema = Depends(AuthUtils.validate_user),
+) -> TokenSchema:
     """
-    Возвращает JWT в заголовке, в случае успешной аутентификации через зависимость ( Выдает токен пользователю )
-    В тело функции мы попадем только в случае успешной палидации логина и пароля
-    :param param:
-    :param param:
-    :return:
+    Возвращает access_token и refresh_token в заголовке, в случае успешной аутентификации через зависимость ( Выдает токены пользователю ),
+    В тело функции мы попадем только в случае успешной валидации логина и пароля
+    :param user: Выполняет валидацию пользователя по всем описанным в логике сценариям, входит в тело обработчика только в случае выполнения этой зависимости
+    :return: access_token и refresh_token в теле запроса
     """
-    payload = {"sub": str(user.id), "name": user.name, "emmail": user.email}
+    access_token = JWTUtils.create_access_token(user=user)
 
-    # Генерирует access_token (токен короткого срока действия), для создания токена необходимо передать payload ( полезную нагрузку )
-    access_token = JWTUtils.encode_jwt(payload)
+    refresh_token = JWTUtils.create_refresh_token(user=user)
 
-    return TokenSchema(access_token=access_token, type_token="Bearer")
+    return TokenSchema(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
 
 
-# Вью, выдающее пользователя после выполнения зависимости AuthUtils.get_current_user, которая достает данные пользователя из полученного в заголовке токена,
-# Парсит их, проверяет наличие такого пользователя в БД.
-# Такая зависимость Заменяет передачу id пользователя как параметр пути или запроса и указавыется как зависимость в любой вью функции, предназначенной для пользователя
-
-@router.get('/me', response_model=UserPublicSchema)
-async def get_user_profile(user: UserPublicSchema = Depends(AuthUtils.get_current_user)):
+# response_model_exclude_none уберет из схемы ответа (TokenSchema) параметры, имеющие значения умолчанию  None, по скольку refresh_token по умолчанию None
+# и для этого запроса на перевыпуск access_token переопределять refresh_token мы не планируем, то чтобы не возвращать в схеме None мы используем такой параметр роутера
+@router.post(
+    "/refresh",
+    response_model=TokenSchema,
+    response_model_exclude_none=True,
+)
+async def reissues_access_jwt_for_user(
+    user: UserSchema = Depends(AuthUtils.get_current_user_by_refresh),
+) -> TokenSchema:
     """
-    Предоставляет пользователю доступ к своим данным в случае успешной проверки данных в токене через зависимость get_current_user
-    :param user:
-    :return:
+    Возвращает access_token и refresh_token в заголовке, в случае успешной аутентификации через зависимость ( Выдает токены пользователю ),
+    В тело функции мы попадем только в случае успешной валидации логина и пароля
+    :param user: Выполняет валидацию пользователя по refresh_token, входит в тело обработчика только в случае выполнения этой зависимости
+    :return: новый access_token
+    """
+    access_token = JWTUtils.create_access_token(user=user)
+
+    return TokenSchema(
+        access_token=access_token,
+    )
+
+
+@router.get("/me", response_model=UserPublicSchema)
+async def get_user_profile(
+    user: UserSchema = Depends(AuthUtils.get_current_user_by_access),
+) -> UserPublicSchema:
+    """
+    Предоставляет пользователю доступ к своим данным в случае успешной проверки данных в токене через зависимость при помощи access_token
+    :param user: Выполняет валидацию пользователя по refresh_token, входит в тело обработчика только в случае выполнения этой зависимости
+    :return: Пользователя
     """
     return user
